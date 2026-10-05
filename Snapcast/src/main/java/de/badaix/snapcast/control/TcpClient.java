@@ -25,7 +25,9 @@ import java.io.BufferedWriter;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -37,6 +39,7 @@ import java.util.concurrent.TimeUnit;
 public class TcpClient {
 
     private static final String TAG = "TCP";
+    private static final int CONNECT_TIMEOUT_MS = 5000;
     private String mServerMessage;
     // sends message received notifications
     private TcpClientListener mMessageListener = null;
@@ -154,13 +157,18 @@ public class TcpClient {
                 if (mMessageListener != null)
                     mMessageListener.onConnecting(TcpClient.this);
 
-                // here you must put your computer's IP address.
-                InetAddress serverAddr = InetAddress.getByName(host);
+                // Prefer IPv4: snapserver < 0.30 listens on IPv4 only
+                InetAddress serverAddr = null;
+                for (InetAddress address : InetAddress.getAllByName(host)) {
+                    if ((serverAddr == null) || (address instanceof Inet4Address && !(serverAddr instanceof Inet4Address)))
+                        serverAddr = address;
+                }
 
-                Log.d(TAG, "Connecting to " + serverAddr.getCanonicalHostName() + ":" + port);
+                Log.d(TAG, "Connecting to " + serverAddr.getHostAddress() + ":" + port);
 
                 // create a socket to make the connection with the server
-                socket = new Socket(serverAddr, port);
+                socket = new Socket();
+                socket.connect(new InetSocketAddress(serverAddr, port), CONNECT_TIMEOUT_MS);
 
 
                 // sends the message to the server

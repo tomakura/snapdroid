@@ -30,6 +30,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.util.Log;
 
+import java.net.Inet4Address;
 import java.net.InetAddress;
 
 @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
@@ -60,6 +61,21 @@ public class NsdHelper {
             mInstance.mContext = context;
         }
         return mInstance;
+    }
+
+    /**
+     * Returns the IP address of a resolved service, preferring IPv4.
+     * Snapserver < 0.30 listens on IPv4 only, so connecting to an IPv6 address (or to a host
+     * name that resolves to one) ends up in an endless "Connection refused" loop.
+     */
+    public static String getHostAddress(NsdServiceInfo serviceInfo) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            for (InetAddress address : serviceInfo.getHostAddresses()) {
+                if (address instanceof Inet4Address)
+                    return address.getHostAddress();
+            }
+        }
+        return serviceInfo.getHost().getHostAddress();
     }
 
     public void startListening(String serviceType, String serviceName, NsdHelperListener listener) {

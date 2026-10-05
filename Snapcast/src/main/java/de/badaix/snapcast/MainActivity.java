@@ -495,7 +495,7 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
     @Override
     public void onResolved(NsdHelper nsdHelper, NsdServiceInfo serviceInfo) {
         Log.d(TAG, "resolved: " + serviceInfo);
-        setHost(serviceInfo.getHost().getCanonicalHostName(), serviceInfo.getPort(), serviceInfo.getPort() + 1);
+        setHost(NsdHelper.getHostAddress(serviceInfo), serviceInfo.getPort(), serviceInfo.getPort() + 1);
         startRemoteControl();
         NsdHelper.getInstance(this).stopListening();
     }
