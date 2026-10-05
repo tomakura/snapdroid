@@ -78,6 +78,21 @@ public class SnapclientService extends Service {
     private boolean logReceived;
     private final Handler restartHandler = new Handler();
     private Runnable restartRunnable = null;
+    private static final int PROCESS_RESTART_DELAY_MIN_MS = 1000;
+    private static final int PROCESS_RESTART_DELAY_MAX_MS = 30000;
+    private int processRestartDelayMs = PROCESS_RESTART_DELAY_MIN_MS;
+    private final Runnable processRestartRunnable = new Runnable() {
+        @Override
+        public void run() {
+            Log.i(TAG, "Restarting Snapclient after unexpected exit");
+            try {
+                startProcess();
+            } catch (IOException e) {
+                e.printStackTrace();
+                onProcessExited(null);
+            }
+        }
+    };
     private String host = null;
     private int port = 0;
 
@@ -110,15 +125,27 @@ public class SnapclientService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null)
-            return START_NOT_STICKY;
+        // A null intent means the system restarted this START_STICKY service after killing it:
+        // resume playback with the last used server
+        String action = (intent == null) ? ACTION_START : intent.getAction();
 
-        if (ACTION_STOP.equals(intent.getAction())) {
+        if (ACTION_STOP.equals(action)) {
             stopService();
             return START_NOT_STICKY;
-        } else if (ACTION_START.equals(intent.getAction())) {
-            String host = intent.getStringExtra(EXTRA_HOST);
-            int port = intent.getIntExtra(EXTRA_PORT, 1704);
+        } else if (ACTION_START.equals(action)) {
+            String host;
+            int port;
+            if (intent == null) {
+                host = Settings.getInstance(getApplicationContext()).getHost();
+                port = Settings.getInstance(getApplicationContext()).getStreamPort();
+                if (host.isEmpty()) {
+                    stopSelf();
+                    return START_NOT_STICKY;
+                }
+            } else {
+                host = intent.getStringExtra(EXTRA_HOST);
+                port = intent.getIntExtra(EXTRA_PORT, 1704);
+            }
 
             Intent stopIntent = new Intent(this, SnapclientService.class);
             stopIntent.setAction(ACTION_STOP);
@@ -153,7 +180,14 @@ public class SnapclientService extends Service {
             builder.setContentIntent(resultPendingIntent);
             // mId allows you to update the notification later on.
             final Notification notification = builder.build();
-            startForeground(123, notification);
+            try {
+                startForeground(123, notification);
+            } catch (Exception e) {
+                // e.g. ForegroundServiceStartNotAllowedException when restarted from the background
+                Log.e(TAG, "startForeground failed", e);
+                stopSelf();
+                return START_NOT_STICKY;
+            }
 
             start(host, port);
             return START_STICKY;
@@ -184,6 +218,8 @@ public class SnapclientService extends Service {
         NotificationManager mNotificationManager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         mNotificationManager.cancel(123);
+        // Don't let the system restart the player after the user stopped it
+        stopSelf();
     }
 
     public synchronized static String getUniqueId(Context context) {
@@ -250,12 +286,13 @@ public class SnapclientService extends Service {
         if (fpb != null)
             env.put("FRAMES_PER_BUFFER", fpb);
         process = pb.start();
+        final java.lang.Process startedProcess = process;
 
         Thread reader = new Thread(new Runnable() {
             @Override
             public void run() {
                 BufferedReader bufferedReader = new BufferedReader(
-                        new InputStreamReader(process.getInputStream()));
+                        new InputStreamReader(startedProcess.getInputStream()));
                 String line;
                 try {
                     while ((line = bufferedReader.readLine()) != null) {
@@ -264,12 +301,32 @@ public class SnapclientService extends Service {
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
+                restartHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        onProcessExited(startedProcess);
+                    }
+                });
             }
         });
         logReceived = false;
         reader.start();
     }
 
+
+    /**
+     * Called on the main thread when the snapclient process terminated.
+     * If it wasn't stopped or replaced on purpose, it is restarted with an exponential backoff.
+     */
+    private void onProcessExited(java.lang.Process exitedProcess) {
+        if (exitedProcess != process)
+            return;
+        Log.w(TAG, "Snapclient exited unexpectedly, restarting in " + processRestartDelayMs + " ms");
+        process = null;
+        restartHandler.removeCallbacks(processRestartRunnable);
+        restartHandler.postDelayed(processRestartRunnable, processRestartDelayMs);
+        processRestartDelayMs = Math.min(processRestartDelayMs * 2, PROCESS_RESTART_DELAY_MAX_MS);
+    }
 
     private void start(String host, int port) {
         Log.d(TAG, "start host: " + host + ", port: " + port);
@@ -347,6 +404,7 @@ public class SnapclientService extends Service {
                 } else if ((message.equals("Init done")) && (restartHandler != null)) {
                     restartHandler.removeCallbacks(restartRunnable);
                     restartRunnable = null;
+                    processRestartDelayMs = PROCESS_RESTART_DELAY_MIN_MS;
                 }
             }
         }
@@ -359,6 +417,8 @@ public class SnapclientService extends Service {
                 reader.interrupt();
             if (process != null)
                 process.destroy();
+            // Clear it, so that the reader thread doesn't treat the exit as unexpected
+            process = null;
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -366,6 +426,8 @@ public class SnapclientService extends Service {
 
     private void stop() {
         Log.d(TAG, "stop");
+        restartHandler.removeCallbacks(processRestartRunnable);
+        processRestartDelayMs = PROCESS_RESTART_DELAY_MIN_MS;
         try {
             stopProcess();
             if ((wakeLock != null) && wakeLock.isHeld())
