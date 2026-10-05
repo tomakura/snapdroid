@@ -41,5 +41,8 @@
     <string name="control_port">コントロール ポート</string>
     <string name="settings">Snapserver ホスト</string>
     <string name="auto_start">Snapclient を自動開始</string>
+    <string name="battery_optimization_title">電池の最適化</string>
+    <string name="battery_optimization_text">画面オフ時の音切れや切断を防ぐため、電池の最適化設定で Snapcast を「最適化しない」(制限なし)にしてください。</string>
+    <string name="open_settings">設定を開く</string>
 </resources>
 

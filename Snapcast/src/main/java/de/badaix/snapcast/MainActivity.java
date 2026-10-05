@@ -30,7 +30,10 @@ import android.media.AudioRecord;
 import android.net.nsd.NsdServiceInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
@@ -43,10 +46,12 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import androidx.core.content.ContextCompat;
+import androidx.lifecycle.Lifecycle;
 
 import com.google.android.material.snackbar.Snackbar;
 
@@ -88,6 +93,15 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
     private CoordinatorLayout coordinatorLayout;
     private Button btnConnect = null;
     private boolean batchActive = false;
+    private static final int CONTROL_RECONNECT_DELAY_MS = 3000;
+    private final Handler reconnectHandler = new Handler(Looper.getMainLooper());
+    private final Runnable reconnectRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED))
+                startRemoteControl();
+        }
+    };
 
     private final ActivityResultLauncher<String> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
@@ -276,6 +290,35 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
         i.setAction(SnapclientService.ACTION_START);
 
         startService(i);
+        askToDisableBatteryOptimization();
+    }
+
+    /**
+     * Battery optimization (Doze, vendor app killers) stalls or kills the player while the screen
+     * is off, causing dropouts and disconnects. Point the user to the settings once.
+     */
+    private void askToDisableBatteryOptimization() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
+            return;
+        if (Settings.getInstance(this).getBoolean("battery_optimization_asked", false))
+            return;
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager.isIgnoringBatteryOptimizations(getPackageName()))
+            return;
+
+        Settings.getInstance(this).put("battery_optimization_asked", true);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.battery_optimization_title)
+                .setMessage(R.string.battery_optimization_text)
+                .setPositiveButton(R.string.open_settings, (dialog, which) -> {
+                    try {
+                        startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to open battery optimization settings", e);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     private void stopSnapclient() {
@@ -294,9 +337,12 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
     }
 
     private void stopRemoteControl() {
-        if ((remoteControl != null) && (remoteControl.isConnected()))
-            remoteControl.disconnect();
+        // Clear the member first, so that onDisconnected doesn't schedule a reconnect
+        RemoteControl rc = remoteControl;
         remoteControl = null;
+        reconnectHandler.removeCallbacks(reconnectRunnable);
+        if ((rc != null) && (rc.isConnected()))
+            rc.disconnect();
     }
 
 
@@ -603,6 +649,11 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
             setActionbarSubtitle("not connected");
         }
         updateMenuItems(false);
+        // Keep retrying while the UI is visible, e.g. after a snapserver restart
+        if (remoteControl == this.remoteControl) {
+            reconnectHandler.removeCallbacks(reconnectRunnable);
+            reconnectHandler.postDelayed(reconnectRunnable, CONTROL_RECONNECT_DELAY_MS);
+        }
     }
 
 

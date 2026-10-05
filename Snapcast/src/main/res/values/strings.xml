@@ -51,5 +51,8 @@
     <string name="resample_audio">resample audio stream</string>
     <string name="auto_start">Auto start Snapclient</string>
     <string name="connect">Connect</string>
+    <string name="battery_optimization_title">Battery optimization</string>
+    <string name="battery_optimization_text">To avoid dropouts and disconnects while the screen is off, set Snapcast to \"Not optimized\" (unrestricted) in the battery optimization settings.</string>
+    <string name="open_settings">Open settings</string>
 </resources>
 

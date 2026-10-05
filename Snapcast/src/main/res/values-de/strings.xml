@@ -51,5 +51,8 @@
     <string name="settings">Einstellungen</string>
     <string name="auto_start">Auto-start Snapclient</string>
     <string name="connect">Verbinden</string>
+    <string name="battery_optimization_title">Akku-Optimierung</string>
+    <string name="battery_optimization_text">Um Aussetzer und Verbindungsabbrüche bei ausgeschaltetem Bildschirm zu vermeiden, stelle Snapcast in den Einstellungen zur Akku-Optimierung auf \"Nicht optimiert\" (uneingeschränkt).</string>
+    <string name="open_settings">Einstellungen öffnen</string>
 </resources>
 
